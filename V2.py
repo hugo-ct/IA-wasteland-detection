@@ -1,6 +1,7 @@
 import tensorflow as tf
-from keras import layers, models, optimizers, regularizers
-from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
+import keras
+from keras import layers, models, optimizers
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report, confusion_matrix
@@ -70,28 +71,16 @@ train_dataset = train_dataset.cache().shuffle(1000).prefetch(buffer_size=AUTOTUN
 validation_dataset = validation_dataset.cache().prefetch(buffer_size=AUTOTUNE)
 test_dataset = test_dataset.cache().prefetch(buffer_size=AUTOTUNE)
 
-# Définition du modèle CNN amélioré
+# Définition du modèle CNN
 model = models.Sequential([
-    layers.Conv2D(32, (3, 3), padding='same', kernel_regularizer=regularizers.l2(0.001), input_shape=(256, 256, 3)),
-    layers.BatchNormalization(),
-    layers.LeakyReLU(),
+    layers.Conv2D(32, (3, 3), activation='relu', input_shape=(256, 256, 3)),
     layers.MaxPooling2D((2, 2)),
-    
-    layers.Conv2D(64, (3, 3), padding='same', kernel_regularizer=regularizers.l2(0.001)),
-    layers.BatchNormalization(),
-    layers.LeakyReLU(),
+    layers.Conv2D(64, (3, 3), activation='relu'),
     layers.MaxPooling2D((2, 2)),
-
-    layers.Conv2D(128, (3, 3), padding='same', kernel_regularizer=regularizers.l2(0.001)),
-    layers.BatchNormalization(),
-    layers.LeakyReLU(),
+    layers.Conv2D(128, (3, 3), activation='relu'),
     layers.MaxPooling2D((2, 2)),
-
-    layers.Conv2D(256, (3, 3), padding='same', kernel_regularizer=regularizers.l2(0.001)),
-    layers.BatchNormalization(),
-    layers.LeakyReLU(),
+    layers.Conv2D(128, (3, 3), activation='relu'),
     layers.MaxPooling2D((2, 2)),
-
     layers.Flatten(),
     layers.Dense(512, activation='relu'),
     layers.Dropout(0.5),
@@ -101,11 +90,10 @@ model = models.Sequential([
 # Afficher le résumé du modèle
 model.summary()
 
-# Compilation du modèle avec un scheduler de taux d'apprentissage
-optimizer = optimizers.Adam(learning_rate=1e-4)
+# Compilation du modèle
 model.compile(
     loss='binary_crossentropy',
-    optimizer=optimizer,
+    optimizer=optimizers.Adam(learning_rate=1e-4),
     metrics=['accuracy']
 )
 
@@ -119,14 +107,12 @@ model_checkpoint = ModelCheckpoint(
     mode='min'
 )
 
-lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.1, patience=5, min_lr=1e-6)
-
 # Entraîner le modèle
 history = model.fit(
     train_dataset,
     validation_data=validation_dataset,
-    epochs=100,
-    callbacks=[early_stopping, model_checkpoint, lr_scheduler]
+    epochs=60,
+    callbacks=[early_stopping, model_checkpoint]
 )
 
 # Charger les meilleurs poids du modèle
@@ -163,5 +149,104 @@ plt.ylabel('Vérité terrain')
 plt.xlabel('Prédiction')
 plt.show()
 
+# Visualisation des courbes de précision et de perte
+acc = history.history['accuracy']
+val_acc = history.history['val_accuracy']
+loss = history.history['loss']
+val_loss = history.history['val_loss']
+
+epochs = range(len(acc))
+
+plt.figure(figsize=(12, 6))
+
+# Précision
+plt.subplot(1, 2, 1)
+plt.plot(epochs, acc, 'bo', label='Précision d\'entraînement')
+plt.plot(epochs, val_acc, 'b', label='Précision de validation')
+plt.title('Précision d\'entraînement et de validation')
+plt.xlabel('Époques')
+plt.ylabel('Précision')
+plt.legend()
+
+# Perte
+plt.subplot(1, 2, 2)
+plt.plot(epochs, loss, 'bo', label='Perte d\'entraînement')
+plt.plot(epochs, val_loss, 'b', label='Perte de validation')
+plt.title('Perte d\'entraînement et de validation')
+plt.xlabel('Époques')
+plt.ylabel('Perte')
+plt.legend()
+
+plt.show()
+
 # Sauvegarde finale du modèle
-model.save('friche_cnn_final_model_complexe.keras')
+model.save('friche_cnn_final_model.keras')
+
+
+def plot_misclassified_images(dataset, model, class_names):
+    misclassified_images = []
+    misclassified_labels = []
+    predictions = []
+    labels_list = []
+
+    # Extraction des images et labels du dataset
+    for images, labels in dataset:
+        preds = model.predict(images)
+        pred_labels = (preds > 0.5).astype(int).flatten()
+        predictions.extend(pred_labels)
+        labels_list.extend(labels.numpy().astype(int))
+
+        # Identification des images mal classées
+        for i, (true_label, pred_label) in enumerate(zip(labels.numpy(), pred_labels)):
+            if true_label != pred_label:
+                misclassified_images.append(images[i])
+                misclassified_labels.append((true_label, pred_label))
+
+    # Limiter à un maximum de 25 images
+    num_images_to_show = min(25, len(misclassified_images))
+    
+    plt.figure(figsize=(15, 15))
+    for i, (image, (true_label, pred_label)) in enumerate(zip(misclassified_images[:num_images_to_show], misclassified_labels[:num_images_to_show])):
+        plt.subplot(5, 5, i+1)
+        # Convertir les images à 8 bits et faire la normalisation inverse pour les afficher correctement
+        plt.imshow(image.numpy().astype("float32"))  # Assurez-vous que l'image est au format float32 pour plt.imshow
+        plt.title(f"True: {class_names[true_label]} / Pred: {class_names[pred_label]}")
+        plt.axis('off')
+    plt.show()
+
+# Appel de la fonction pour visualiser les erreurs
+plot_misclassified_images(test_dataset, model, class_names)
+
+
+# Fonction pour visualiser les images mal classées
+def plot_misclassified_images(dataset, model, class_names):
+    misclassified_images = []
+    misclassified_labels = []
+    predictions = []
+    labels_list = []
+
+    for images, labels in dataset:
+        preds = model.predict(images)
+        pred_labels = (preds > 0.5).astype(int)
+        predictions.extend(pred_labels.flatten())
+        labels_list.extend(labels.numpy().astype(int))
+        
+        for i, (true_label, pred_label) in enumerate(zip(labels.numpy(), pred_labels.flatten())):
+            if true_label != pred_label:
+                misclassified_images.append(images[i])
+                misclassified_labels.append((true_label, pred_label))
+
+    # Limiter à un maximum de 25 images
+    num_images_to_show = min(25, len(misclassified_images))
+    
+    plt.figure(figsize=(15, 15))
+    for i, (image, (true_label, pred_label)) in enumerate(zip(misclassified_images[:num_images_to_show], misclassified_labels[:num_images_to_show])):
+        plt.subplot(5, 5, i+1)
+        plt.imshow(image.numpy().astype("uint8"))
+        plt.title(f"True: {class_names[true_label]} / Pred: {class_names[pred_label]}")
+        plt.axis('off')
+    plt.show()
+
+# Appel de la fonction pour visualiser les erreurs
+plot_misclassified_images(test_dataset, model, class_names)
+
